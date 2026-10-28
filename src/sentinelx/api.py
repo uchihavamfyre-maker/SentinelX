@@ -1,0 +1,31 @@
+"""FastAPI interface for the SentinelX detection core."""
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from .detection import detect_brute_force
+from .evaluation import evaluate_detector
+from .models import AuthEvent
+
+app = FastAPI(title="SentinelX API", version="0.1.0",
+    description="Defensive analysis of synthetic or explicitly authorized authentication logs.")
+
+class AnalysisRequest(BaseModel):
+    events: list[AuthEvent] = Field(max_length=10000)
+    threshold: int = Field(default=5, ge=2, le=1000)
+    window_seconds: int = Field(default=300, ge=1, le=86400)
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok", "project": "SentinelX", "version": "0.1.0"}
+
+@app.post("/analyze")
+def analyze(request: AnalysisRequest) -> dict:
+    try: alerts = detect_brute_force(request.events, request.threshold, request.window_seconds)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"event_count": len(request.events), "alert_count": len(alerts),
+            "alerts": [alert.model_dump(mode="json") for alert in alerts]}
+
+@app.post("/evaluate")
+def evaluate(request: AnalysisRequest) -> dict:
+    if any(event.label is None for event in request.events):
+        raise HTTPException(status_code=422, detail="Every event must include a label for evaluation.")
+    return evaluate_detector(request.events, request.threshold, request.window_seconds).model_dump()
