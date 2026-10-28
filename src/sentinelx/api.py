@@ -16,8 +16,15 @@ _origins = [origin.strip() for origin in os.getenv(
     "SENTINELX_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 ).split(",") if origin.strip()]
 app.add_middleware(
-    CORSMiddleware, allow_origins=_origins, allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type"],
+    CORSMiddleware,
+    allow_origins=_origins,
+    # Vercel may serve production aliases and preview deployments on different
+    # *.vercel.app hostnames. Permit those browser origins for this stateless
+    # analysis API while retaining the explicit local-development allowlist.
+    allow_origin_regex=r"https://[a-zA-Z0-9-]+(?:-[a-zA-Z0-9-]+)*\.vercel\.app",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 class AnalysisRequest(BaseModel):
