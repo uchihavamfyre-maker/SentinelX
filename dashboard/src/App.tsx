@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   Activity, AlertOctagon, AlertTriangle, ArrowDownRight, ArrowUpRight,
   CheckCircle2, ChevronDown, CircleHelp, Clock3, Download, ExternalLink,
@@ -119,11 +120,15 @@ export default function App() {
   const [apiUrl, setApiUrl] = useState("");
   const [apiState, setApiState] = useState<"demo" | "connected" | "error">("demo");
   const [busy, setBusy] = useState(false);
+  const [apiSnapshot, setApiSnapshot] = useState<{ threshold: number; windowSeconds: number; alerts: Alert[]; metrics: Metrics } | null>(null);
   const [selected, setSelected] = useState<Alert | null>(null);
   const [notice, setNotice] = useState("Synthetic lab dataset loaded. No external systems contacted.");
 
-  const alerts = useMemo(() => detect(events, threshold, windowSeconds), [events, threshold, windowSeconds]);
-  const metrics = useMemo(() => evaluate(events, alerts), [events, alerts]);
+  const localAlerts = useMemo(() => detect(events, threshold, windowSeconds), [events, threshold, windowSeconds]);
+  const localMetrics = useMemo(() => evaluate(events, localAlerts), [events, localAlerts]);
+  const snapshotMatches = !!apiSnapshot && apiSnapshot.threshold === threshold && apiSnapshot.windowSeconds === windowSeconds;
+  const alerts = snapshotMatches ? apiSnapshot!.alerts : localAlerts;
+  const metrics = snapshotMatches ? apiSnapshot!.metrics : localMetrics;
   const filteredAlerts = alerts.filter(a => {
     const q = search.toLowerCase();
     return (!q || [a.username, a.source_ip, a.rule_id, a.title].some(v => v.toLowerCase().includes(q)))
@@ -153,6 +158,7 @@ export default function App() {
   async function refreshFromApi() {
     if (!apiUrl.trim()) {
       setApiState("demo");
+      setApiSnapshot(null);
       setNotice("Using local synthetic demo mode. Enter an API base URL to connect a running SentinelX API.");
       return;
     }
@@ -167,11 +173,18 @@ export default function App() {
       });
       if (!analyzeResponse.ok) throw new Error(`Analyze returned HTTP ${analyzeResponse.status}`);
       const data = await analyzeResponse.json();
+      const evalResponse = await fetch(`${base}/evaluate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events, threshold, window_seconds: windowSeconds }),
+      });
+      if (!evalResponse.ok) throw new Error(`Evaluate returned HTTP ${evalResponse.status}`);
+      const evaluated = await evalResponse.json();
+      setApiSnapshot({ threshold, windowSeconds, alerts: data.alerts as Alert[], metrics: evaluated as Metrics });
       setApiState("connected");
-      setNotice(`Connected to SentinelX API. Backend returned ${data.alert_count} alerts for ${data.event_count} events.`);
-      setEvents(prev => [...prev]);
+      setNotice(`Connected to SentinelX API. Backend analyzed ${data.event_count} events and returned ${data.alert_count} alerts. Changing the rule settings requires reconnecting to refresh the backend snapshot.`);
     } catch (err) {
       setApiState("error");
+      setApiSnapshot(null);
       setNotice(`API connection failed: ${err instanceof Error ? err.message : "unknown error"}. Dashboard remains in local demo mode.`);
     } finally { setBusy(false); }
   }
@@ -189,7 +202,7 @@ export default function App() {
   }
   function resetDemo() {
     setEvents(buildDemoEvents()); setThreshold(5); setWindowSeconds(300); setSeverity("all"); setSearch("");
-    setApiState("demo"); setNotice("Synthetic lab dataset reset to baseline.");
+    setApiState("demo"); setApiSnapshot(null); setNotice("Synthetic lab dataset reset to baseline.");
   }
 
   return <div className="app-shell">
@@ -248,6 +261,6 @@ export default function App() {
 }
 
 function TargetIcon() { return <CheckCircle2/>; }
-function Metric({ label, value, sub, icon, tone, trend }: { label: string; value: string; sub: string; icon: React.ReactNode; tone: string; trend: string }) {
+function Metric({ label, value, sub, icon, tone, trend }: { label: string; value: string; sub: string; icon: ReactNode; tone: string; trend: string }) {
   return <div className="metric-card"><div className="metric-top"><span>{label}</span><div className={`metric-icon ${tone}`}>{icon}</div></div><div className="metric-value">{value}</div><div className="metric-bottom"><span>{sub}</span><span className="metric-trend">{trend}</span></div></div>;
 }
