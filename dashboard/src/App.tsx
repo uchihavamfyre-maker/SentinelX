@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity, AlertOctagon, AlertTriangle, ArrowDownRight, ArrowUpRight,
@@ -117,7 +117,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("all");
   const [tab, setTab] = useState<"incidents" | "events" | "research">("incidents");
-  const [apiUrl, setApiUrl] = useState("");
+  const [apiUrl, setApiUrl] = useState("https://sentinelx-api-infinity-core.vercel.app");
   const [apiState, setApiState] = useState<"demo" | "connected" | "error">("demo");
   const [busy, setBusy] = useState(false);
   const [apiSnapshot, setApiSnapshot] = useState<{ threshold: number; windowSeconds: number; alerts: Alert[]; metrics: Metrics } | null>(null);
@@ -188,6 +188,13 @@ export default function App() {
       setNotice(`API connection failed: ${err instanceof Error ? err.message : "unknown error"}. Dashboard remains in local demo mode.`);
     } finally { setBusy(false); }
   }
+
+  useEffect(() => {
+    void refreshFromApi();
+    // Connect to the deployed API once on startup; keep synthetic demo data available on failure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function exportJson() {
     const blob = new Blob([JSON.stringify({ generated_at: new Date().toISOString(), config: { threshold, window_seconds: windowSeconds }, metrics, alerts, events }, null, 2)], { type: "application/json" });
     download(blob, "sentinelx-analysis.json");
