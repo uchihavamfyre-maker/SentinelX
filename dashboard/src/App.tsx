@@ -163,21 +163,30 @@ export default function App() {
       return;
     }
     setBusy(true);
+    let stage = "health check";
     try {
       const base = apiUrl.trim().replace(/\/$/, "");
       const health = await fetch(`${base}/health`);
-      if (!health.ok) throw new Error("Health check failed");
+      if (!health.ok) throw new Error(`Health check returned HTTP ${health.status}`);
+      stage = "authentication-event analysis";
       const analyzeResponse = await fetch(`${base}/analyze`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ events, threshold, window_seconds: windowSeconds }),
       });
-      if (!analyzeResponse.ok) throw new Error(`Analyze returned HTTP ${analyzeResponse.status}`);
+      if (!analyzeResponse.ok) {
+        const detail = await analyzeResponse.text();
+        throw new Error(`Analyze returned HTTP ${analyzeResponse.status}: ${detail.slice(0, 240)}`);
+      }
       const data = await analyzeResponse.json();
+      stage = "detector evaluation";
       const evalResponse = await fetch(`${base}/evaluate`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ events, threshold, window_seconds: windowSeconds }),
       });
-      if (!evalResponse.ok) throw new Error(`Evaluate returned HTTP ${evalResponse.status}`);
+      if (!evalResponse.ok) {
+        const detail = await evalResponse.text();
+        throw new Error(`Evaluate returned HTTP ${evalResponse.status}: ${detail.slice(0, 240)}`);
+      }
       const evaluated = await evalResponse.json();
       setApiSnapshot({ threshold, windowSeconds, alerts: data.alerts as Alert[], metrics: evaluated as Metrics });
       setApiState("connected");
@@ -185,7 +194,9 @@ export default function App() {
     } catch (err) {
       setApiState("error");
       setApiSnapshot(null);
-      setNotice(`API connection failed: ${err instanceof Error ? err.message : "unknown error"}. Dashboard remains in local demo mode.`);
+      const detail = err instanceof Error ? err.message : String(err);
+      const likelyCors = detail.includes("Failed to fetch") || detail.includes("NetworkError") || detail.includes("Load failed");
+      setNotice(`API connection failed during ${stage}: ${detail}.${likelyCors ? " This may be a browser CORS or network block; check the API CORS allowlist." : ""} Dashboard remains in local demo mode.`);
     } finally { setBusy(false); }
   }
 
