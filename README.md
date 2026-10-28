@@ -11,6 +11,7 @@ SentinelX is a research-oriented defensive security lab for analyzing **syntheti
 - Produces explainable alerts with severity, rule identifiers, evidence, and event IDs.
 - Evaluates labeled synthetic scenarios using precision, recall, F1, false-positive rate, and confusion counts.
 - Includes deterministic data generation, a FastAPI service, CLI commands, and automated tests.
+- Includes a responsive React + TypeScript SOC dashboard with alert inspection, filters, exports, rule tuning, and threshold experiments.
 - Includes a threat model, evaluation methodology, and CI workflow.
 
 ## Quick start
@@ -43,6 +44,20 @@ The evaluator treats an event as predicted suspicious when its ID appears in ale
 - False-positive rate = FP / (FP + TN)
 
 Undefined denominators return 0.0. Always report dataset size, label balance, seed, threshold, time window, and scoring convention. Results on synthetic data do **not** establish real-world detection performance.
+
+## Dashboard
+
+The React + Vite dashboard lives in `dashboard/` and works in local synthetic-demo mode without a backend.
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+To connect the dashboard to the API, enter the API base URL in **Backend connection**. Configure `SENTINELX_CORS_ORIGINS` on the API host with a comma-separated allowlist containing the dashboard's exact origin. Do not use a wildcard allowlist with credentials. The dashboard's local demo is explicitly labeled and uses synthetic events only.
+
+Build the dashboard with `npm run build`.
 
 ## API
 
