@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/sentinelx/:path*",
+      "destination": "https://sentinelx-api-infinity-core.vercel.app/:path*"
+    }
+  ]
+}
