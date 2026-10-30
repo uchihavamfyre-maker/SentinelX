@@ -117,7 +117,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("all");
   const [tab, setTab] = useState<"incidents" | "events" | "research">("incidents");
-  const [apiUrl, setApiUrl] = useState("https://sentinelx-api-infinity-core.vercel.app");
+  const [apiUrl, setApiUrl] = useState("/api/sentinelx");
   const [apiState, setApiState] = useState<"demo" | "connected" | "error">("demo");
   const [busy, setBusy] = useState(false);
   const [apiSnapshot, setApiSnapshot] = useState<{ threshold: number; windowSeconds: number; alerts: Alert[]; metrics: Metrics } | null>(null);
