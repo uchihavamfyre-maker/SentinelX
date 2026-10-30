@@ -122,6 +122,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [apiSnapshot, setApiSnapshot] = useState<{ threshold: number; windowSeconds: number; alerts: Alert[]; metrics: Metrics } | null>(null);
   const [selected, setSelected] = useState<Alert | null>(null);
+  const [liveMode, setLiveMode] = useState(false);
+  const [simulationCount, setSimulationCount] = useState(0);
   const [notice, setNotice] = useState("Synthetic lab dataset loaded. No external systems contacted.");
 
   const localAlerts = useMemo(() => detect(events, threshold, windowSeconds), [events, threshold, windowSeconds]);
@@ -202,9 +204,60 @@ export default function App() {
 
   useEffect(() => {
     void refreshFromApi();
-    // Connect to the deployed API once on startup; keep synthetic demo data available on failure.
+    // Re-run backend analysis whenever events or detector configuration changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [events, threshold, windowSeconds]);
+
+  useEffect(() => {
+    if (!liveMode) return;
+    const timer = window.setInterval(() => {
+      const now = new Date().toISOString();
+      const failed = Math.random() < 0.38;
+      const event: AuthEvent = {
+        event_id: "live-" + Date.now() + "-" + Math.random().toString(16).slice(2, 7),
+        timestamp: now,
+        source_ip: failed ? "203.0.113.77" : "192.0.2." + (20 + Math.floor(Math.random() * 40)),
+        username: failed ? "simulated-admin" : "analyst-" + (1 + Math.floor(Math.random() * 5)),
+        event_type: failed ? "login_failure" : "login_success",
+        label: failed ? "suspicious" : "normal",
+      };
+      setEvents(current => [...current.slice(-498), event]);
+    }, 2200);
+    return () => window.clearInterval(timer);
+  }, [liveMode]);
+
+  function simulateBruteForce() {
+    const now = Date.now();
+    const batch: AuthEvent[] = Array.from({ length: 8 }, (_, i) => ({
+      event_id: "sim-attack-" + now + "-" + (i + 1),
+      timestamp: new Date(now + i * 1800).toISOString(),
+      source_ip: "203.0.113.77",
+      username: "simulated-admin",
+      event_type: "login_failure",
+      label: "suspicious",
+    }));
+    setEvents(current => [...current.slice(-492), ...batch]);
+    setSimulationCount(value => value + 1);
+    setNotice("Attack simulation injected 8 synthetic failed logins from documentation-only IP 203.0.113.77. No external system was contacted.");
+  }
+
+  function simulateNormalTraffic() {
+    const now = Date.now();
+    const batch: AuthEvent[] = Array.from({ length: 6 }, (_, i) => ({
+      event_id: "sim-normal-" + now + "-" + (i + 1),
+      timestamp: new Date(now + i * 900).toISOString(),
+      source_ip: "192.0.2." + (30 + i),
+      username: "test-user-" + (i + 1),
+      event_type: "login_success",
+      label: "normal",
+    }));
+    setEvents(current => [...current.slice(-494), ...batch]);
+    setNotice("Added 6 synthetic successful logins to the lab dataset.");
+  }
+
+  function printIncidentReport() {
+    window.print();
+  }
 
   function exportJson() {
     const blob = new Blob([JSON.stringify({ generated_at: new Date().toISOString(), config: { threshold, window_seconds: windowSeconds }, metrics, alerts, events }, null, 2)], { type: "application/json" });
@@ -244,7 +297,7 @@ export default function App() {
     <main className="main-content">
       <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</b></div><div className="top-actions"><span className={`connection ${apiState}`}><i/>{apiState === "connected" ? "API connected" : apiState === "error" ? "API offline" : "Demo mode"}</span><button className="icon-button" title="Reset demo data" onClick={resetDemo}><RefreshCw size={16}/></button><div className="avatar">SX</div></div></header>
       <div className="page">
-        <div className="page-heading"><div><div className="eyebrow"><span/> DEFENSIVE SECURITY ANALYTICS</div><h1>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</h1><p>Monitor authentication patterns, investigate alerts, and evaluate detection performance.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCsv}><Download size={15}/> Export CSV</button><button className="button primary" onClick={exportJson}><Download size={15}/> Export report</button></div></div>
+        <div className="page-heading"><div><div className="eyebrow"><span/> DEFENSIVE SECURITY ANALYTICS</div><h1>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</h1><p>Monitor authentication patterns, investigate alerts, and evaluate detection performance.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCsv}><Download size={15}/> Export CSV</button><button className="button primary" onClick={exportJson}><Download size={15}/> Export JSON</button></div></div>
         <div className="notice"><div className="notice-icon"><ShieldCheck size={16}/></div><span>{notice}</span><button onClick={() => setNotice("Safety scope: local synthetic events only. API connection is opt-in.")} title="Safety details"><CircleHelp size={15}/></button></div>
 
         <section className="metrics-grid">
@@ -263,6 +316,17 @@ export default function App() {
         </section>
 
         <section className="panel config-panel"><div className="panel-heading"><div><h2><SlidersHorizontal size={17}/> Detection configuration</h2><p>Adjust the baseline rule and observe how the output changes.</p></div><span className="rule-badge">AUTH-001</span></div><div className="config-controls"><label className="range-control"><span>Failure threshold <b>{threshold} events</b></span><input type="range" min="2" max="10" value={threshold} onChange={e => setThreshold(Number(e.target.value))}/><small>Minimum failed logins required to trigger an alert</small></label><label className="select-control"><span>Correlation window</span><select value={windowSeconds} onChange={e => setWindowSeconds(Number(e.target.value))}><option value={60}>1 minute</option><option value={180}>3 minutes</option><option value={300}>5 minutes</option><option value={600}>10 minutes</option><option value={900}>15 minutes</option></select><small>Events grouped by source IP + username</small></label><div className="config-result"><div className="result-icon"><Activity size={17}/></div><div><small>Current result</small><strong>{alerts.length} alerts</strong><span>Recalculated locally</span></div></div></div></section>
+
+        <section className="panel config-panel simulation-panel">
+          <div className="panel-heading"><div><h2><Activity size={17}/> Live attack simulation</h2><p>Generate controlled test telemetry and watch AUTH-001 respond.</p></div><span className={liveMode ? "status-chip" : "rule-badge"}>{liveMode ? "● STREAMING" : "LAB MODE"}</span></div>
+          <div className="simulation-actions">
+            <button className="button primary" onClick={simulateBruteForce}><ShieldAlert size={15}/> Simulate brute-force</button>
+            <button className="button secondary" onClick={simulateNormalTraffic}><CheckCircle2 size={15}/> Normal traffic</button>
+            <button className={liveMode ? "button danger" : "button secondary"} onClick={() => setLiveMode(value => !value)}><Activity size={15}/>{liveMode ? "Stop live stream" : "Start live stream"}</button>
+            <button className="button secondary" onClick={printIncidentReport}><Download size={15}/> Print report</button>
+          </div>
+          <div className="simulation-foot"><span><i className="live-dot"/>{events.length} events in working set</span><span>{simulationCount} attack simulations run</span><span>Reserved TEST-NET IP ranges only</span></div>
+        </section>
 
         {tab === "research" && <section className="research-grid"><div className="panel research-panel"><div className="panel-heading"><div><h2>Evaluation summary</h2><p>Event-level classification against synthetic labels</p></div></div><div className="confusion-grid"><div><small>True positive</small><strong className="green-text">{metrics.true_positive}</strong></div><div><small>False positive</small><strong className="red-text">{metrics.false_positive}</strong></div><div><small>True negative</small><strong>{metrics.true_negative}</strong></div><div><small>False negative</small><strong className="amber-text">{metrics.false_negative}</strong></div></div><div className="metric-line"><span>F1 score</span><b>{metrics.f1.toFixed(4)}</b></div><div className="metric-line"><span>False-positive rate</span><b>{pct(metrics.false_positive_rate)}</b></div><div className="metric-line"><span>Labeled events</span><b>{metrics.labeled_events}</b></div></div><div className="panel research-panel"><div className="panel-heading"><div><h2>Threshold experiment</h2><p>Same data and window; vary threshold from 2 to 10</p></div></div><div className="sweep-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={Array.from({length:9}, (_,i) => { const t=i+2; const m=evaluate(events, detect(events,t,windowSeconds)); return { threshold: String(t), precision: +(m.precision*100).toFixed(1), recall: +(m.recall*100).toFixed(1) }; })}><CartesianGrid stroke="#20283a" strokeDasharray="3 5" vertical={false}/><XAxis dataKey="threshold" tick={{ fill:"#7e8ba5",fontSize:10 }} axisLine={false} tickLine={false}/><YAxis domain={[0,100]} tick={{ fill:"#7e8ba5",fontSize:10 }} axisLine={false} tickLine={false}/><Tooltip contentStyle={{ background:"#111827",border:"1px solid #293449",borderRadius:10,fontSize:12 }}/><Bar dataKey="precision" name="Precision %" fill="#34d399" radius={[3,3,0,0]}/><Bar dataKey="recall" name="Recall %" fill="#a78bfa" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer></div><p className="research-note"><CircleHelp size={14}/> Exploratory sweep on the same synthetic dataset; not a held-out benchmark.</p></div></section>}
 
