@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity, AlertOctagon, AlertTriangle, ArrowDownRight, ArrowUpRight,
@@ -53,38 +53,7 @@ function buildDemoEvents(): AuthEvent[] {
   return rows.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }
 
-function detect(events: AuthEvent[], threshold: number, windowSeconds: number): Alert[] {
-  const grouped = new Map<string, AuthEvent[]>();
-  events.filter(e => e.event_type === "login_failure").forEach(e => {
-    const key = `${e.source_ip}| ${e.username}`;
-    grouped.set(key, [...(grouped.get(key) ?? []), e]);
-  });
-  const out: Alert[] = [];
-  grouped.forEach(group => {
-    const ordered = [...group].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    let left = 0;
-    for (let right = 0; right < ordered.length; right++) {
-      const current = Date.parse(ordered[right].timestamp);
-      while (left < right && Date.parse(ordered[left].timestamp) < current - windowSeconds * 1000) left++;
-      const evidence = ordered.slice(left, right + 1);
-      if (evidence.length < threshold) continue;
-      const ids = evidence.map(e => e.event_id);
-      const signature = ids.join("|");
-      const count = evidence.length;
-      const severity = count >= threshold * 3 ? "critical" : count >= threshold * 2 ? "high" : "medium";
-      out.push({
-        alert_id: "alert-" + hash(signature), rule_id: "AUTH-001",
-        title: "Repeated authentication failures", severity,
-        source_ip: ordered[right].source_ip, username: ordered[right].username,
-        first_seen: evidence[0].timestamp, last_seen: ordered[right].timestamp,
-        event_count: count, evidence_event_ids: ids,
-        explanation: `${count} failed logins for ${ordered[right].username} from ${ordered[right].source_ip} within ${windowSeconds}s.`,
-      });
-    }
-  });
-  const unique = new Map(out.map(a => [a.alert_id, a]));
-  return [...unique.values()].sort((a, b) => b.last_seen.localeCompare(a.last_seen));
-}
+function detect(events: AuthEvent[], threshold: number, windowSeconds: number): Alert[] { const groups = new Map<string, AuthEvent[]>(); events.filter(e => e.event_type === "login_failure").forEach(e => { const k = e.source_ip + "|" + e.username; groups.set(k, [...(groups.get(k) ?? []), e]); }); const result: Alert[] = []; groups.forEach(group => { const sorted = [...group].sort((x,y) => x.timestamp.localeCompare(y.timestamp)); let left = 0; let latest: AuthEvent[] = []; for (let right=0; right<sorted.length; right++) { const t=Date.parse(sorted[right].timestamp); while(left<=right && Date.parse(sorted[left].timestamp)<t-windowSeconds*1000) left++; const batch=sorted.slice(left,right+1); if(batch.length>=threshold) latest=batch; } if(!latest.length) return; const last=latest[latest.length-1]; const count=latest.length; result.push({ alert_id: "incident-"+hash(last.source_ip+"|"+last.username+"|AUTH-001"), rule_id:"AUTH-001", title:"Repeated authentication failures", severity:count>=threshold*3?"critical":count>=threshold*2?"high":"medium", source_ip:last.source_ip, username:last.username, first_seen:latest[0].timestamp, last_seen:last.timestamp, event_count:count, evidence_event_ids:latest.map(e=>e.event_id), explanation:count+" failed logins for "+last.username+" from "+last.source_ip+" within "+windowSeconds+"s." }); }); return result.sort((x,y)=>y.last_seen.localeCompare(x.last_seen)); }
 function hash(value: string) {
   let h = 2166136261;
   for (let i = 0; i < value.length; i++) h = Math.imul(h ^ value.charCodeAt(i), 16777619);
