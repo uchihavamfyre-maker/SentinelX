@@ -5,7 +5,7 @@ import {
   CheckCircle2, ChevronDown, CircleHelp, Clock3, Download, ExternalLink,
   FileSearch, Filter, Gauge, Github, LockKeyhole, RefreshCw, Search,
   Settings2, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Terminal,
-  Wifi, WifiOff, X
+  Wifi, WifiOff, X, Sun, Moon
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -81,6 +81,7 @@ const time = (s: string) => new Date(s).toLocaleTimeString([], { hour: "2-digit"
 
 export default function App() {
   const [events, setEvents] = useState<AuthEvent[]>(buildDemoEvents);
+  const [theme, setTheme] = useState<"dark" | "light">(() => (localStorage.getItem("sentinelx-theme") as "dark" | "light") || "dark");
   const [threshold, setThreshold] = useState(5);
   const [windowSeconds, setWindowSeconds] = useState(300);
   const [search, setSearch] = useState("");
@@ -94,6 +95,8 @@ export default function App() {
   const [liveMode, setLiveMode] = useState(false);
   const [simulationCount, setSimulationCount] = useState(0);
   const [notice, setNotice] = useState("Synthetic lab dataset loaded. No external systems contacted.");
+
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("sentinelx-theme", theme); }, [theme]);
 
   const localAlerts = useMemo(() => detect(events, threshold, windowSeconds), [events, threshold, windowSeconds]);
   const localMetrics = useMemo(() => evaluate(events, localAlerts), [events, localAlerts]);
@@ -264,7 +267,7 @@ export default function App() {
     </aside>
 
     <main className="main-content">
-      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</b></div><div className="top-actions"><span className={`connection ${apiState}`}><i/>{apiState === "connected" ? "API connected" : apiState === "error" ? "API offline" : "Demo mode"}</span><button className="icon-button" title="Reset demo data" onClick={resetDemo}><RefreshCw size={16}/></button><div className="avatar">SX</div></div></header>
+      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</b></div><div className="top-actions"><span className={`connection ${apiState}`}><i/>{apiState === "connected" ? "API connected" : apiState === "error" ? "API offline" : "Demo mode"}</span><button className="icon-button" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(current => current === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={16}/> : <Moon size={16}/>}</button><button className="icon-button" title="Reset demo data" onClick={resetDemo}><RefreshCw size={16}/></button><div className="avatar">SX</div></div></header>
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow"><span/> DEFENSIVE SECURITY ANALYTICS</div><h1>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</h1><p>Monitor authentication patterns, investigate alerts, and evaluate detection performance.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCsv}><Download size={15}/> Export CSV</button><button className="button primary" onClick={exportJson}><Download size={15}/> Export JSON</button></div></div>
         <div className="notice"><div className="notice-icon"><ShieldCheck size={16}/></div><span>{notice}</span><button onClick={() => setNotice("Safety scope: local synthetic events only. API connection is opt-in.")} title="Safety details"><CircleHelp size={15}/></button></div>
