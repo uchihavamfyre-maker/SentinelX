@@ -90,6 +90,7 @@ export default function App() {
   const [apiUrl, setApiUrl] = useState("/api/sentinelx");
   const [apiState, setApiState] = useState<"demo" | "connected" | "error">("demo");
   const [busy, setBusy] = useState(false);
+  const requestSequence = useRef(0);
   const [apiSnapshot, setApiSnapshot] = useState<{ threshold: number; windowSeconds: number; alerts: Alert[]; metrics: Metrics } | null>(null);
   const [selected, setSelected] = useState<Alert | null>(null);
   const [liveMode, setLiveMode] = useState(false);
@@ -136,14 +137,15 @@ export default function App() {
       setNotice("Using local synthetic demo mode. Enter an API base URL to connect a running SentinelX API.");
       return;
     }
+    const requestId = ++requestSequence.current;
     setBusy(true);
     let stage = "health check";
     try {
       const base = apiUrl.trim().replace(/\/$/, "");
-      const health = await fetch(`${base}/health`);
+      const health = await fetch(`${base}/health`, { cache: "no-store" });
       if (!health.ok) throw new Error(`Health check returned HTTP ${health.status}`);
       stage = "authentication-event analysis";
-      const analyzeResponse = await fetch(`${base}/analyze`, {
+      const analyzeResponse = await fetch(`${base}/analyze`, { cache: "no-store",
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ events, threshold, window_seconds: windowSeconds }),
       });
@@ -153,7 +155,7 @@ export default function App() {
       }
       const data = await analyzeResponse.json();
       stage = "detector evaluation";
-      const evalResponse = await fetch(`${base}/evaluate`, {
+      const evalResponse = await fetch(`${base}/evaluate`, { cache: "no-store",
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ events, threshold, window_seconds: windowSeconds }),
       });
@@ -162,20 +164,23 @@ export default function App() {
         throw new Error(`Evaluate returned HTTP ${evalResponse.status}: ${detail.slice(0, 240)}`);
       }
       const evaluated = await evalResponse.json();
+      if (requestId !== requestSequence.current) return;
       setApiSnapshot({ threshold, windowSeconds, alerts: data.alerts as Alert[], metrics: evaluated as Metrics });
       setApiState("connected");
       setNotice(`Connected to SentinelX API. Backend analyzed ${data.event_count} events and returned ${data.alert_count} alerts. Changing the rule settings requires reconnecting to refresh the backend snapshot.`);
     } catch (err) {
+      if (requestId !== requestSequence.current) return;
       setApiState("error");
       setApiSnapshot(null);
       const detail = err instanceof Error ? err.message : String(err);
       const likelyCors = detail.includes("Failed to fetch") || detail.includes("NetworkError") || detail.includes("Load failed");
       setNotice(`API connection failed during ${stage}: ${detail}.${likelyCors ? " This may be a browser CORS or network block; check the API CORS allowlist." : ""} Dashboard remains in local demo mode.`);
-    } finally { setBusy(false); }
+    } finally { if (requestId === requestSequence.current) setBusy(false); }
   }
 
   useEffect(() => {
     void refreshFromApi();
+    return () => { requestSequence.current += 1; };
     // Re-run backend analysis whenever events or detector configuration changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, threshold, windowSeconds]);
@@ -267,7 +272,7 @@ export default function App() {
     </aside>
 
     <main className="main-content">
-      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</b></div><div className="top-actions"><span className={`connection ${apiState}`}><i/>{apiState === "connected" ? "API connected" : apiState === "error" ? "API offline" : "Demo mode"}</span><button className="icon-button" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(current => current === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={16}/> : <Moon size={16}/>}</button><button className="icon-button" title="Reset demo data" onClick={resetDemo}><RefreshCw size={16}/></button><div className="avatar">SX</div></div></header>
+      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</b></div><div className="top-actions"><span className={`connection ${apiState}`}><i/>{apiState === "connected" ? "API connected" : apiState === "error" ? "API offline" : "Demo mode"}</span><button className="icon-button theme-toggle" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(current => current === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={16}/> : <Moon size={16}/>}</button><button className="icon-button reset-button" title="Reset demo data" onClick={resetDemo}><RefreshCw size={16}/></button><div className="avatar">SX</div></div></header>
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow"><span/> DEFENSIVE SECURITY ANALYTICS</div><h1>{tab === "incidents" ? "Security overview" : tab === "events" ? "Event explorer" : "Research & metrics"}</h1><p>Monitor authentication patterns, investigate alerts, and evaluate detection performance.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCsv}><Download size={15}/> Export CSV</button><button className="button primary" onClick={exportJson}><Download size={15}/> Export JSON</button></div></div>
         <div className="notice"><div className="notice-icon"><ShieldCheck size={16}/></div><span>{notice}</span><button onClick={() => setNotice("Safety scope: local synthetic events only. API connection is opt-in.")} title="Safety details"><CircleHelp size={15}/></button></div>
