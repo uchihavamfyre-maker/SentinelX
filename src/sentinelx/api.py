@@ -32,6 +32,10 @@ class AnalysisRequest(BaseModel):
     threshold: int = Field(default=5, ge=2, le=1000)
     window_seconds: int = Field(default=300, ge=1, le=86400)
 
+class AnalystNoteRequest(BaseModel):
+    author: str = Field(default="analyst", min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=10000)
+
 class IngestRequest(BaseModel):
     events: list[AuthEvent] = Field(min_length=1, max_length=1000)
     threshold: int = Field(default=5, ge=2, le=1000)
@@ -170,3 +174,52 @@ def incident_evidence(incident_id: str, limit: int = 500) -> dict:
         return {"count": len(rows), "evidence": rows}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Evidence query failed: {type(exc).__name__}") from exc
+
+
+@app.get("/incidents/{incident_id}/notes")
+def list_incident_notes(incident_id: str, limit: int = 100) -> dict:
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500.")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT incident_id FROM incidents WHERE incident_id=%s", (incident_id,))
+                if cur.fetchone() is None:
+                    raise HTTPException(status_code=404, detail="Incident not found.")
+                cur.execute(
+                    """SELECT note_id,incident_id,author,body,created_at
+                       FROM analyst_notes WHERE incident_id=%s
+                       ORDER BY created_at DESC,note_id DESC LIMIT %s""",
+                    (incident_id, limit),
+                )
+                rows = cur.fetchall()
+        return {"count": len(rows), "notes": rows}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Note query failed: {type(exc).__name__}") from exc
+
+
+@app.post("/incidents/{incident_id}/notes", status_code=201)
+def create_incident_note(incident_id: str, request: AnalystNoteRequest) -> dict:
+    author = request.author.strip()
+    body = request.body.strip()
+    if not author or not body:
+        raise HTTPException(status_code=422, detail="Author and note body cannot be blank.")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO analyst_notes (incident_id,author,body)
+                       SELECT incident_id,%s,%s FROM incidents WHERE incident_id=%s
+                       RETURNING note_id,incident_id,author,body,created_at""",
+                    (author, body, incident_id),
+                )
+                row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Incident not found.")
+        return row
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Note creation failed: {type(exc).__name__}") from exc
