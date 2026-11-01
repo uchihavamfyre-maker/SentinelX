@@ -52,8 +52,8 @@ def require_analyst(authorization: str | None = Header(default=None)) -> dict:
         signing_key = _jwks_client().get_signing_key_from_jwt(token)
         issuer = f"{urlsplit(base_url).scheme}://{urlsplit(base_url).netloc}"
         claims = jwt.decode(token, signing_key.key, algorithms=["EdDSA", "RS256", "ES256"], issuer=issuer, options={"require": ["exp", "sub", "iss"]})
-        if claims.get("role") != "authenticated" or not claims.get("sub"):
-            raise jwt.InvalidTokenError("Token is not an authenticated user session")
+        if not claims.get("sub"):
+            raise jwt.InvalidTokenError("Token has no subject")
         return claims
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired analyst session.", headers={"WWW-Authenticate": "Bearer"}) from exc
