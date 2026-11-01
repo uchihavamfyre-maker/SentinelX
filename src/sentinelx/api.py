@@ -1,7 +1,12 @@
 """FastAPI interface for the SentinelX defensive detection core."""
 import hmac
 import os
-from fastapi import FastAPI, Header, HTTPException
+from functools import lru_cache
+from urllib.parse import urlsplit
+
+import jwt
+from jwt import PyJWKClient
+from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .detection import detect_brute_force
@@ -23,9 +28,36 @@ app.add_middleware(
     allow_origins=_origins,
     allow_origin_regex=r"https://[a-zA-Z0-9-]+(?:-[a-zA-Z0-9-]+)*\\.vercel\\.app",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@lru_cache(maxsize=1)
+def _jwks_client() -> PyJWKClient:
+    jwks_url = os.getenv("NEON_AUTH_JWKS_URL", "").strip()
+    if not jwks_url:
+        raise RuntimeError("Neon Auth JWKS URL is not configured")
+    return PyJWKClient(jwks_url, cache_keys=True)
+
+
+def require_analyst(authorization: str | None = Header(default=None)) -> dict:
+    base_url = os.getenv("NEON_AUTH_BASE_URL", "").strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=503, detail="Analyst authentication is not configured.")
+    scheme, token = (authorization or "").split(" ", 1) if " " in (authorization or "") else ("", "")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="A valid analyst session is required.", headers={"WWW-Authenticate": "Bearer"})
+    try:
+        signing_key = _jwks_client().get_signing_key_from_jwt(token)
+        issuer = f"{urlsplit(base_url).scheme}://{urlsplit(base_url).netloc}"
+        claims = jwt.decode(token, signing_key.key, algorithms=["EdDSA", "RS256", "ES256"], issuer=issuer, options={"require": ["exp", "sub", "iss"]})
+        if claims.get("role") != "authenticated" or not claims.get("sub"):
+            raise jwt.InvalidTokenError("Token is not an authenticated user session")
+        return claims
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired analyst session.", headers={"WWW-Authenticate": "Bearer"}) from exc
+
 
 class AnalysisRequest(BaseModel):
     events: list[AuthEvent] = Field(max_length=10000)
@@ -133,7 +165,7 @@ def list_incidents(status: str | None = None, limit: int = 100) -> dict:
 
 
 @app.patch("/incidents/{incident_id}/status")
-def update_incident_status(incident_id: str, status: str) -> dict:
+def update_incident_status(incident_id: str, status: str, analyst: dict = Depends(require_analyst)) -> dict:
     if status not in {"open", "investigating", "resolved", "false_positive"}:
         raise HTTPException(status_code=422, detail="Invalid incident status.")
     try:
@@ -201,8 +233,8 @@ def list_incident_notes(incident_id: str, limit: int = 100) -> dict:
 
 
 @app.post("/incidents/{incident_id}/notes", status_code=201)
-def create_incident_note(incident_id: str, request: AnalystNoteRequest) -> dict:
-    author = request.author.strip()
+def create_incident_note(incident_id: str, request: AnalystNoteRequest, analyst: dict = Depends(require_analyst)) -> dict:
+    author = str(analyst.get('email') or analyst.get('sub') or 'analyst')[:120]
     body = request.body.strip()
     if not author or not body:
         raise HTTPException(status_code=422, detail="Author and note body cannot be blank.")
